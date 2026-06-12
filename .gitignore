@@ -1,0 +1,47 @@
+
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+*.spec
+.vscode/
+
+# Environment & Secrets (AIOX)
+.env
+.env.local
+.env.*.local
+*.key
+*.pem
+
+# Dependencies (AIOX)
+node_modules/
+node_modules
+
+# Build & Logs (AIOX)
+dist/
+build/
+*.log
+logs/
+
+# IDE & OS (AIOX)
+.DS_Store
+Thumbs.db
+.idea/
+*.swp
+
+# AIOX core (regeneratable via aiox-install)
+.aiox-core/
+.antigravity/
+.claude/
+.codex/
+.cursor/
+.gemini/
+.kimi/
+
+# AIOX GitHub agents (regeneratable)
+.github/
+
+# Internal project files
+project-template.md
