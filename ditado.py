@@ -1,7 +1,9 @@
 """Ditado — Windows speech-to-text dictation app.
 
-Press F8 to record, press F8 again to transcribe and paste
-the result into the active window via simulated Ctrl+V.
+F8: Press to record, press again to transcribe and paste
+     the result into the active window via simulated Ctrl+V.
+F9: Press to start/stop audio recording (microphone + system audio).
+     Saves MP3 to ~/Music/Ditado/.
 """
 
 import ctypes
@@ -21,11 +23,16 @@ import sounddevice as sd
 from faster_whisper import WhisperModel
 from PIL import Image, ImageDraw
 
+from recording import AudioRecorder
+
 user32 = ctypes.windll.user32
 
 WM_HOTKEY = 0x0312
 VK_F8 = 0x77
+VK_F9 = 0x78
 MOD_NOREPEAT = 0x4000
+HOTKEY_F8_ID = 1
+HOTKEY_F9_ID = 2
 
 MODEL_SIZE = "small"
 
@@ -49,6 +56,7 @@ _language = "pt"
 
 _recording = False
 _audio_chunks = []
+_audio_recorder = None
 _icon = None
 _model = None
 _hotkey_thread_running = True
@@ -121,7 +129,11 @@ def transcribe():
 
 def start_recording():
     """Begin audio capture and update the tray icon to red."""
-    global _recording, _audio_chunks
+    global _recording, _audio_chunks, _audio_recorder
+    if _audio_recorder and _audio_recorder.is_recording:
+        if _icon:
+            _icon.notify("Stop audio recording (F9) first", "Ditado")
+        return
     _audio_chunks = []
     _recording = True
     if _icon:
@@ -147,18 +159,66 @@ def toggle_recording():
         start_recording()
 
 
+def on_audio_recorder_state(new_state):
+    """Called when AudioRecorder state changes."""
+    global _audio_recorder
+    if _icon:
+        if new_state == AudioRecorder.STATE_RECORDING:
+            _icon.icon = create_icon(True)
+            _icon.notify("Recording started", "Ditado")
+        elif new_state == AudioRecorder.STATE_IDLE:
+            _icon.icon = create_icon(False)
+
+
+def toggle_audio_recording():
+    """Start or stop audio recording (F9) based on current state."""
+    global _audio_recorder
+    if _recording:
+        if _icon:
+            _icon.notify("Stop dictation (F8) first", "Ditado")
+        return
+    if _audio_recorder and _audio_recorder.is_recording:
+        result = _audio_recorder.stop()
+        _audio_recorder = None
+        if result and _icon:
+            path, duration = result
+            mins, secs = divmod(int(duration), 60)
+            size = os.path.getsize(path) / (1024 * 1024)
+            _icon.notify(
+                f"Recording saved ({mins}m{secs}s / {size:.1f}MB)\n{path}",
+                "Ditado",
+            )
+    else:
+        recorder = AudioRecorder(on_state_change=on_audio_recorder_state)
+        recorder.start()
+        if recorder.is_recording:
+            _audio_recorder = recorder
+
+
+def open_recordings_folder():
+    """Open the recordings folder in File Explorer."""
+    path = os.path.expanduser(r"~\Music\Ditado")
+    os.makedirs(path, exist_ok=True)
+    os.startfile(path)
+
+
 def hotkey_listener():
-    """Run a Win32 message pump in a daemon thread to detect F8 hotkey presses."""
+    """Run a Win32 message pump in a daemon thread to detect F8 and F9 hotkey presses."""
     global _hotkey_thread_running
-    user32.RegisterHotKey(None, 1, 0, VK_F8)
+    user32.RegisterHotKey(None, HOTKEY_F8_ID, MOD_NOREPEAT, VK_F8)
+    user32.RegisterHotKey(None, HOTKEY_F9_ID, MOD_NOREPEAT, VK_F9)
     msg = wintypes.MSG()
     while _hotkey_thread_running:
         ret = user32.GetMessageW(ctypes.byref(msg), None, 0, 0)
         if ret == 0:
             break
         if msg.message == WM_HOTKEY:
-            toggle_recording()
-    user32.UnregisterHotKey(None, 1)
+            if msg.wParam == HOTKEY_F8_ID:
+                toggle_recording()
+            elif msg.wParam == HOTKEY_F9_ID:
+                toggle_audio_recording()
+    user32.UnregisterHotKey(None, HOTKEY_F8_ID)
+    user32.UnregisterHotKey(None, HOTKEY_F9_ID)
 
 
 def startup_shortcut_path():
@@ -232,11 +292,21 @@ def language_menu():
 
 def create_menu():
     """Build the system-tray right-click menu."""
+    recording_f9 = _audio_recorder and _audio_recorder.is_recording
     return pystray.Menu(
         pystray.MenuItem(
             lambda item: "⏹ Stop Recording" if _recording else "🎤 Start Recording",
             toggle_recording,
             default=True,
+        ),
+        pystray.Menu.SEPARATOR,
+        pystray.MenuItem(
+            lambda item: "⏹ Stop Audio Recording" if recording_f9 else "🔴 Start Audio Recording (F9)",
+            toggle_audio_recording,
+        ),
+        pystray.MenuItem(
+            "Open Recordings Folder",
+            open_recordings_folder,
         ),
         pystray.Menu.SEPARATOR,
         pystray.MenuItem(
@@ -255,7 +325,10 @@ def create_menu():
 
 def quit_app():
     """Cleanly shut down the hotkey thread, systray icon, and process."""
-    global _hotkey_thread_running
+    global _hotkey_thread_running, _audio_recorder
+    if _audio_recorder and _audio_recorder.is_recording:
+        _audio_recorder.cleanup()
+        _audio_recorder = None
     _hotkey_thread_running = False
     if _icon:
         _icon.stop()

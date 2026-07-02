@@ -25,12 +25,15 @@ Ditado lets me externalize my thoughts 3-4x faster than typing, directly into an
 
 ## Features
 
-- **F8 hotkey** — toggle recording from any application
+- **F8 hotkey** — toggle dictation recording from any application
+- **F9 hotkey** — toggle audio recording (microphone + system audio via WASAPI loopback)
 - **13 languages** — switch between Portuguese (default), English, Spanish, French, German, Italian, Dutch, Japanese, Chinese, Russian, Arabic, Korean, or auto-detect via the tray menu
 - **Fully offline** — audio never leaves your machine; uses faster-whisper locally
 - **Auto-paste** — transcribed text is automatically pasted via Ctrl+V
 - **System tray** — runs quietly in the background with a microphone icon
 - **Startup option** — toggle "Run at Windows Startup" from the tray menu
+- **Audio Recording** — captures both sides of a conversation (your mic + system audio), saved as MP3 to `~/Music/Ditado/`
+- **L=microphone, R=system** — stereo MP3 separates your voice (left) from the other side (right) for future diarization
 
 ---
 
@@ -54,11 +57,15 @@ Ditado lets me externalize my thoughts 3-4x faster than typing, directly into an
 ## Quick Start
 
 ```bash
-pip install faster-whisper sounddevice numpy pyperclip pystray pillow
+pip install faster-whisper sounddevice numpy pyperclip pystray pillow pyaudiowpatch
 python ditado.py
 ```
 
+### Dictation (F8)
 Press **F8** to start recording, press **F8** again to transcribe and paste.
+
+### Audio Recording (F9)
+Press **F9** to start recording microphone + system audio, press **F9** again to save as MP3. Files are saved to `%USERPROFILE%\Music\Ditado\`.
 
 > **Note:** The first run downloads the Whisper model (~500 MB). Subsequent launches are instant.
 
@@ -66,16 +73,28 @@ Press **F8** to start recording, press **F8** again to transcribe and paste.
 
 ## Usage
 
+### Dictation (F8)
 1. Run `python ditado.py` — the app hides its console and appears in the system tray
 2. Press **F8** — the icon turns red and a notification confirms recording
 3. Speak (in any of the 13 supported languages)
 4. Press **F8** again — audio is transcribed and the text is pasted into the active window
 5. For longer recordings, **transcription may take a few minutes** — wait for the paste notification
 6. Right-click the tray icon to:
-   - **Stop Recording** / **Start Recording**
+   - **Start/Stop Recording** (F8)
+   - **Start/Stop Audio Recording** (F9)
+   - **Open Recordings Folder** — browse saved MP3 files
    - **Language** — select from 13 languages or auto-detect
    - **Run at Windows Startup**
    - **Quit**
+
+### Audio Recording (F9)
+1. Press **F9** to start — the icon turns red, notification confirms
+2. Both your microphone and system audio (e.g. meeting audio from Teams/Zoom) are captured
+3. Press **F9** again — MP3 is finalized and saved to `~/Music/Ditado/`
+4. The stereo file has: **L = your microphone**, **R = system audio**
+5. Use any media player or transcription tool to process the recording
+
+> **Note:** F8 (dictation) and F9 (audio recording) are mutually exclusive — stop one before starting the other.
 
 ---
 
@@ -119,6 +138,7 @@ Switch languages at any time from the tray menu **Language** submenu:
 - Windows 10 or 11
 - Python 3.10+ (if running from source)
 - Microphone
+- [ffmpeg](https://ffmpeg.org/download.html) (for MP3 encoding — included in the installer build)
 
 ---
 

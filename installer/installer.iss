@@ -2,7 +2,7 @@
 ; Requires Inno Setup 6+ (https://jrsoftware.org/isinfo.php)
 
 #define MyAppName "Ditado"
-#define MyAppVersion "1.0.0"
+#define MyAppVersion "1.1.0"
 #define MyAppPublisher "Erick"
 #define MyAppURL "https://github.com/erick/ditado"
 #define MyAppExeName "ditado.exe"
