@@ -307,6 +307,21 @@ def toggle_audio_recording():
             _audio_recorder = recorder
 
 
+def show_about():
+    """Show a Windows message box with app info."""
+    ctypes.windll.user32.MessageBoxW(
+        0,
+        "Ditado v1.2.0\n\n"
+        "Offline dictation & meeting recording for Windows.\n"
+        "100% local speech recognition using faster-whisper.\n\n"
+        "Created by Erick Guedes\n"
+        "https://github.com/erickguedes/ditado\n\n"
+        "MIT License \u00a9 2026",
+        "About Ditado",
+        0,
+    )
+
+
 def open_recordings_folder():
     """Open the recordings folder in File Explorer."""
     path = os.path.expanduser(r"~\Music\Ditado")
@@ -431,6 +446,7 @@ def create_menu():
             language_menu(),
         ),
         pystray.Menu.SEPARATOR,
+        pystray.MenuItem("About Ditado", show_about),
         pystray.MenuItem("Quit", quit_app),
     )
 
