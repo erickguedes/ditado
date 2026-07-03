@@ -50,14 +50,16 @@ Press F9 once to begin recording.
 
 Press F9 again to finish.
 
-The recording is immediately saved as an MP3 inside:
+The recording is saved as an MP3 and automatically transcribed into a .txt file with speaker labels.
 
 ~/Music/Ditado/
 Rather than mixing everything together, Ditado stores the recording in stereo:
 
 Left channel: microphone
 Right channel: system audio
-This small design decision preserves information that would otherwise be lost, making future speaker separation (diarization) much easier.
+This channel separation is what makes speaker identification possible. After transcription, each segment is compared across both channels: the dominant energy tells us who spoke. Microphone dominant means "Me." System audio dominant means "Other."
+
+No GPU required. No cloud calls. Just numpy and a simple energy comparison.
 
 Design Decisions
 Everything stays offline
@@ -97,7 +99,10 @@ Ditado instead stores:
 
 Left = microphone
 Right = system audio
-The resulting MP3 is almost the same size, but preserves enough information to enable future processing such as speaker separation and cleaner transcription.
+
+This paid off immediately. The stereo recording enables a straightforward channel-energy diarization: for each transcribed segment, compare RMS energy in the left channel versus the right channel. Whichever side is louder gets the label.
+
+It is not perfect—overlapping speech, loud environments, and single-speaker calls still challenge the approach. But for two-person conversations on a call, it works well enough to tell who said what.
 
 Streaming MP3 encoding
 Meetings can easily last an hour or more.
@@ -129,7 +134,10 @@ Technical Highlights
 Fully offline speech recognition using faster-whisper
 Global F8 hotkey for instant dictation
 Global F9 hotkey for meeting recording
-13 supported languages plus automatic language detection
+13 supported languages plus automatic language detection (auto-detect working for Portuguese, English, Spanish, and more)
+Automatic transcription of every F9 recording to .txt with speaker labels (Me / Other)
+Channel-energy based diarization using stereo separation (no GPU required)
+F9 reliability fixes: sample rate resampling, silent period correction, terminal window suppression, streaming blocksize sync
 Windows system tray application
 Automatic paste into any text field
 Microphone + system audio recording
@@ -156,16 +164,22 @@ Existing users shouldn't notice that anything changed.
 
 They simply gained another capability.
 
+The F9 mode itself had bugs that only appeared in real-world use. The microphone and loopback devices often run at different sample rates (48000 Hz vs 44100 or 96000 Hz), which produced slowed, distorted audio. A silent period at the start of recordings caused the MP3 encoder to miss the first few seconds. The Windows terminal window flashed briefly when ffmpeg started. And an 18-second cap turned out to be caused by the loopback callback aborting prematurely, starving the encoder pipeline.
+
+Each issue was small on its own, but together they made the feature unreliable. Debugging them required understanding how Windows audio, Python threads, and ffmpeg pipes interact—a combination that is surprisingly hard to test systematically.
+
+Speaker diarization also proved trickier than expected. My first attempt used spectral centroid analysis—essentially detecting pitch differences—to cluster speakers. It works well in theory but fails on phone calls, where audio compression and narrow bandwidth make voices sound spectrally similar. I scrapped that approach and switched to channel-energy comparison, which uses the stereo separation already built into the recording format. Simpler, more reliable, and zero GPU dependency.
+
 What's Next
-The current version already solves the problems that motivated the project.
+The current version (v1.2.0) already solves the problems that motivated the project.
 
-I use Ditado every day to interact with AI, write documentation, capture ideas, and record meetings.
+I use Ditado every day to interact with AI, write documentation, capture ideas, record meetings, and get diarized transcripts back.
 
-The next logical step is automatic meeting transcription.
+Automatic transcription and speaker identification are no longer future plans—they work today.
 
-Because recordings already preserve microphone and system audio on separate channels, the architecture is ready for speaker-aware transcription and diarization in the future.
+What comes next is refinement. The channel-energy diarization handles two-person conversations well, but it is limited to "Me" and "Other." Multi-speaker scenarios (three or more people in a room) would benefit from MFCC-based features or, eventually, a lightweight neural diarization model that runs on CPU. Multi-language recordings could be improved by per-segment language detection instead of a single global setting.
 
-That work becomes much easier because the recording format was designed with those capabilities in mind from the beginning.
+The long-term vision is a complete meeting analysis pipeline: talk-time ratios, silence detection, topic extraction, and searchable transcripts. But the foundation is solid, and it all stays 100% local and open source.
 
 Why Open Source?
 Ditado is released under the MIT License because I believe privacy tools become more trustworthy when people can inspect how they work.
