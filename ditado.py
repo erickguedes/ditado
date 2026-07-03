@@ -13,6 +13,7 @@ import sys
 import tempfile
 import threading
 import time
+import traceback
 import wave
 from ctypes import wintypes
 
@@ -170,6 +171,114 @@ def on_audio_recorder_state(new_state):
             _icon.icon = create_icon(False)
 
 
+def _read_audio_stereo(path: str, sr: int = 16000):
+    """Decode MP3 to stereo float32 numpy array at target sample rate.
+    Returns (N,2) array where [:,0]=mic(L), [:,1]=loopback(R).
+    """
+    cmd = [
+        "ffmpeg", "-i", path,
+        "-f", "s16le", "-ac", "2", "-ar", str(sr),
+        "-hide_banner", "-loglevel", "error",
+        "pipe:1",
+    ]
+    try:
+        r = subprocess.run(cmd, capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
+        raw = np.frombuffer(r.stdout, dtype=np.int16).astype(np.float32) / 32768.0
+        return raw.reshape(-1, 2), sr
+    except Exception:
+        return None, sr
+
+
+def _segment_rms(audio: np.ndarray, sr: int, start: float, end: float, channel: int) -> float:
+    """RMS energy of a segment in a given stereo channel."""
+    lo = max(0, int(start * sr))
+    hi = min(audio.shape[0], int(end * sr))
+    if hi - lo < 64:
+        return 0.0
+    chunk = audio[lo:hi, channel]
+    return float(np.sqrt(np.mean(chunk ** 2)))
+
+
+def _diarize_segments(segments, audio: np.ndarray, sr: int):
+    """Label each segment as 'Me' (mic/L) or 'Other' (loopback/R) via channel energy."""
+    labels = []
+    for seg in segments:
+        e_l = _segment_rms(audio, sr, seg.start, seg.end, 0)
+        e_r = _segment_rms(audio, sr, seg.start, seg.end, 1)
+        if max(e_l, e_r) < 0.005:
+            labels.append(None)
+        elif e_l > e_r * 1.5:
+            labels.append("Me")
+        elif e_r > e_l * 1.5:
+            labels.append("Other")
+        else:
+            labels.append(None)
+    prev = "Me"
+    for i in range(len(labels)):
+        if labels[i] is None:
+            labels[i] = prev
+        else:
+            prev = labels[i]
+    return labels
+
+
+def _format_timestamp(seconds: float) -> str:
+    m, s = divmod(int(seconds), 60)
+    return f"{m:02d}:{s:02d}"
+
+
+def transcribe_file(mp3_path: str, duration: float):
+    """Transcribe MP3, diarize speakers via channel energy, save .txt."""
+    txt_path = os.path.splitext(mp3_path)[0] + ".txt"
+    try:
+        lang = _language if _language else None
+        segments_gen, info = _model.transcribe(mp3_path, language=lang, beam_size=5)
+        segments = list(segments_gen)
+
+        if not segments:
+            return
+
+        audio, sr = _read_audio_stereo(mp3_path)
+        audio_arr = audio if audio is not None else np.zeros((1, 2), dtype=np.float32)
+
+        speakers = _diarize_segments(segments, audio_arr, sr)
+
+        lines: list[str] = []
+        lang_name = info.language.upper() if hasattr(info, 'language') else "?"
+        lines.append(f"=== Diarized Transcription ===")
+        lines.append(f"Language: {lang_name}")
+        mins, secs = divmod(int(duration), 60)
+        lines.append(f"Duration: {mins}m{secs}s")
+        lines.append("")
+
+        speaker_stats: dict[str, float] = {}
+        for seg, spk in zip(segments, speakers):
+            ts = f"[{_format_timestamp(seg.start)} - {_format_timestamp(seg.end)}]"
+            text = seg.text.strip()
+            lines.append(f"{ts} {spk}: {text}")
+            speaker_stats[spk] = speaker_stats.get(spk, 0) + (seg.end - seg.start)
+
+        lines.append("")
+        lines.append("--- Speaker Statistics ---")
+        total = duration
+        for spk, dur in sorted(speaker_stats.items()):
+            pct = dur / total * 100 if total > 0 else 0
+            lines.append(f"{spk}: {_format_timestamp(dur)} ({pct:.0f}%)")
+
+        output = "\n".join(lines)
+        with open(txt_path, "w", encoding="utf-8") as f:
+            f.write(output)
+
+        if _icon:
+            preview = segments[0].text[:80] + ("..." if len(segments[0].text) > 80 else "")
+            _icon.notify(
+                f"Transcribed ({mins}m{secs}s) - {len(speaker_stats)} speaker(s)\n{preview}",
+                "Ditado",
+            )
+    except Exception:
+        traceback.print_exc()
+
+
 def toggle_audio_recording():
     """Start or stop audio recording (F9) based on current state."""
     global _audio_recorder
@@ -185,9 +294,12 @@ def toggle_audio_recording():
             mins, secs = divmod(int(duration), 60)
             size = os.path.getsize(path) / (1024 * 1024)
             _icon.notify(
-                f"Recording saved ({mins}m{secs}s / {size:.1f}MB)\n{path}",
+                f"Recording saved - Transcribing... ({mins}m{secs}s / {size:.1f}MB)",
                 "Ditado",
             )
+            threading.Thread(
+                target=transcribe_file, args=(path, duration), daemon=True
+            ).start()
     else:
         recorder = AudioRecorder(on_state_change=on_audio_recorder_state)
         recorder.start()

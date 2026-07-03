@@ -11,6 +11,8 @@ class MP3StreamEncoder:
     """Encodes PCM audio to MP3 via ffmpeg pipe (streaming)."""
 
     def __init__(self, output_path: str):
+        startupinfo = subprocess.STARTUPINFO()
+        startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
         self._process = subprocess.Popen(
             [
                 "ffmpeg", "-y",
@@ -25,6 +27,8 @@ class MP3StreamEncoder:
             stdin=subprocess.PIPE,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
+            startupinfo=startupinfo,
+            creationflags=subprocess.CREATE_NO_WINDOW,
         )
         self._closed = False
 

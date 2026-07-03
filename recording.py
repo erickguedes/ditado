@@ -39,6 +39,8 @@ class AudioRecorder:
         self._py_audio = None
         self._start_time = 0.0
         self._has_loopback = False
+        self._loopback_rate = SAMPLE_RATE
+        self._loopback_channels = 2
 
     @property
     def is_recording(self):
@@ -67,17 +69,18 @@ class AudioRecorder:
             samplerate=SAMPLE_RATE,
             channels=1,
             dtype="float32",
+            blocksize=1024,
             callback=self._mic_callback,
         )
         self._mic_stream.start()
 
         if loopback_dev is not None:
-            loopback_rate = int(loopback_dev["defaultSampleRate"])
-            loopback_channels = min(loopback_dev["maxInputChannels"], 2)
+            self._loopback_rate = int(loopback_dev["defaultSampleRate"])
+            self._loopback_channels = min(loopback_dev["maxInputChannels"], 2)
             self._loopback_stream = self._py_audio.open(
                 format=pyaudio.paInt16,
-                channels=loopback_channels,
-                rate=loopback_rate,
+                channels=self._loopback_channels,
+                rate=self._loopback_rate,
                 input=True,
                 input_device_index=loopback_dev["index"],
                 frames_per_buffer=1024,
@@ -85,14 +88,14 @@ class AudioRecorder:
             )
             self._loopback_stream.start_stream()
 
-        self._stop_event.clear()
-        self._mixer_thread = threading.Thread(target=self._mixer_loop, daemon=True)
-        self._mixer_thread.start()
-
         self.state = self.STATE_RECORDING
         self._start_time = time.time()
         if self._on_state_change:
             self._on_state_change(self.state)
+
+        self._stop_event.clear()
+        self._mixer_thread = threading.Thread(target=self._mixer_loop, daemon=True)
+        self._mixer_thread.start()
 
     def stop(self):
         if self.state != self.STATE_RECORDING:
@@ -177,25 +180,59 @@ class AudioRecorder:
     def _loopback_callback(self, in_data, frame_count, time_info, status):
         if self.state == self.STATE_RECORDING and in_data is not None:
             self._loopback_queue.put_nowait(in_data)
+        return (None, pyaudio.paContinue)
+
+    @staticmethod
+    def _resample_pcm(data: bytes, src_rate: int, dst_rate: int, channels: int) -> bytes:
+        """Resample PCM int16 from src_rate to dst_rate via linear interpolation."""
+        if src_rate == dst_rate or not data:
+            return data
+        old = np.frombuffer(data, dtype=np.int16).reshape(-1, channels)
+        src_frames = len(old)
+        dst_frames = max(1, int(src_frames * dst_rate / src_rate))
+        x_old = np.arange(src_frames, dtype=np.float64)
+        x_new = np.linspace(0, src_frames - 1, dst_frames)
+        out = np.zeros((dst_frames, channels), dtype=np.int16)
+        for ch in range(channels):
+            out[:, ch] = np.interp(x_new, x_old, old[:, ch].astype(np.float64)).astype(np.int16)
+        return out.tobytes()
 
     def _mixer_loop(self):
         from encoder import mix_to_stereo
 
+        LOOP_FRAME_BYTES = 1024 * 2 * 2  # 1024 stereo frames × int16 × 2ch
+        loop_buf = b""
+
         while not self._stop_event.is_set() or not (
             self._mic_queue.empty() and self._loopback_queue.empty()
         ):
-            mic_chunk = None
-            loop_chunk = None
             try:
-                mic_chunk = self._mic_queue.get(timeout=0.2)
+                mic_chunk = self._mic_queue.get_nowait()
             except queue.Empty:
-                pass
-            try:
-                loop_chunk = self._loopback_queue.get(timeout=0.2)
-            except queue.Empty:
-                pass
-            if mic_chunk is None and loop_chunk is None:
+                mic_chunk = None
+
+            # Drain loopback queue, resample each chunk to SAMPLE_RATE
+            while True:
+                try:
+                    raw = self._loopback_queue.get_nowait()
+                    loop_buf += self._resample_pcm(
+                        raw, self._loopback_rate, SAMPLE_RATE, self._loopback_channels
+                    )
+                except queue.Empty:
+                    break
+
+            if mic_chunk is None:
+                if not self._stop_event.is_set():
+                    time.sleep(0.01)
                 continue
+
+            # Consume exactly 1024 stereo frames of resampled loopback
+            if len(loop_buf) >= LOOP_FRAME_BYTES:
+                loop_chunk = loop_buf[:LOOP_FRAME_BYTES]
+                loop_buf = loop_buf[LOOP_FRAME_BYTES:]
+            else:
+                loop_chunk = None
+
             pcm = mix_to_stereo(mic_chunk, loop_chunk)
             if pcm and self._encoder:
                 self._encoder.write(pcm)
