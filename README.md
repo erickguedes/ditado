@@ -34,6 +34,7 @@ Ditado lets me externalize my thoughts 3-4x faster than typing, directly into an
 - **Startup option** — toggle "Run at Windows Startup" from the tray menu
 - **Audio Recording** — captures both sides of a conversation (your mic + system audio), saved as MP3 to `~/Music/Ditado/`
 - **L=microphone, R=system** — stereo MP3 separates your voice (left) from the other side (right) for future diarization
+- **Smart notifications** — clear feedback when microphone is disconnected, audio is too quiet, or no speech is detected
 
 ---
 
@@ -126,7 +127,7 @@ Switch languages at any time from the tray menu **Language** submenu:
 
 | Package | Size | Description |
 |---------|------|-------------|
-| [`Ditado-Installer-1.0.0.exe`](https://github.com/erickguedes/ditado/releases) | ~112 MB | Inno Setup installer — installs to Program Files, creates Start Menu & Desktop shortcuts, adds uninstaller |
+| [`Ditado-Installer-1.2.1.exe`](https://github.com/erickguedes/ditado/releases) | ~112 MB | Inno Setup installer — installs to Program Files, creates Start Menu & Desktop shortcuts, adds uninstaller |
 | [`ditado.exe`](https://github.com/erickguedes/ditado/releases) | ~110 MB | Portable standalone .exe — no install needed, just run |
 
 > The Whisper model (~500 MB) is downloaded on first launch automatically.

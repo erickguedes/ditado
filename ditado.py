@@ -61,6 +61,7 @@ _audio_recorder = None
 _icon = None
 _model = None
 _hotkey_thread_running = True
+_audio_stream = None
 
 
 def hide_console():
@@ -87,6 +88,8 @@ def create_icon(recording):
 
 def audio_callback(indata, frames, time_info, status):
     """Accumulate raw audio chunks into _audio_chunks while recording is active."""
+    if status:
+        pass  # overflow/underflow happen occasionally, not fatal
     if _recording:
         _audio_chunks.append(indata.copy())
 
@@ -95,8 +98,15 @@ def transcribe():
     """Transcribe accumulated audio, copy to clipboard, and simulate Ctrl+V paste."""
     global _recording, _audio_chunks
     if not _audio_chunks:
+        if _icon:
+            _icon.notify("No audio captured. Check your microphone.", "Ditado")
         return
     audio = np.concatenate(_audio_chunks, axis=0)
+    _audio_chunks = []
+    if np.max(np.abs(audio)) < 0.001:
+        if _icon:
+            _icon.notify("Audio too quiet. Check microphone volume.", "Ditado")
+        return
     with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
         wav_path = tmp.name
     try:
@@ -111,7 +121,6 @@ def transcribe():
         text = " ".join(s.text.strip() for s in segments)
         if text.strip():
             pyperclip.copy(text)
-            # Simulate Ctrl+V: press Ctrl, press V, release V, release Ctrl
             time.sleep(0.15)
             user32.keybd_event(0x11, 0, 0, 0)
             user32.keybd_event(0x56, 0, 0, 0)
@@ -121,6 +130,12 @@ def transcribe():
             if _icon:
                 preview = text[:60] + ("..." if len(text) > 60 else "")
                 _icon.notify(f'Pasted: "{preview}"', "Ditado")
+        else:
+            if _icon:
+                _icon.notify("No speech detected in recording.", "Ditado")
+    except Exception as e:
+        if _icon:
+            _icon.notify(f"Transcription error: {e}", "Ditado")
     finally:
         try:
             os.unlink(wav_path)
@@ -134,6 +149,10 @@ def start_recording():
     if _audio_recorder and _audio_recorder.is_recording:
         if _icon:
             _icon.notify("Stop audio recording (F9) first", "Ditado")
+        return
+    if _audio_stream and not _audio_stream.active:
+        if _icon:
+            _icon.notify("Audio stream lost. Restart Ditado.", "Ditado")
         return
     _audio_chunks = []
     _recording = True
@@ -311,7 +330,7 @@ def show_about():
     """Show a Windows message box with app info."""
     ctypes.windll.user32.MessageBoxW(
         0,
-        "Ditado v1.2.0\n\n"
+        "Ditado v1.2.1\n\n"
         "Offline dictation & meeting recording for Windows.\n"
         "100% local speech recognition using faster-whisper.\n\n"
         "Created by Erick Guedes\n"
@@ -465,7 +484,7 @@ def quit_app():
 
 def main():
     """Initialize model, systray icon, audio stream, and hotkey listener."""
-    global _model, _icon
+    global _model, _icon, _audio_stream
     hide_console()
     _model = WhisperModel(MODEL_SIZE, device="cpu", compute_type="int8")
     _icon = pystray.Icon(
@@ -474,8 +493,8 @@ def main():
         "Ditado - Speech-to-Text",
         create_menu(),
     )
-    stream = sd.InputStream(samplerate=16000, channels=1, callback=audio_callback)
-    stream.start()
+    _audio_stream = sd.InputStream(samplerate=16000, channels=1, callback=audio_callback)
+    _audio_stream.start()
     t = threading.Thread(target=hotkey_listener, daemon=True)
     t.start()
     _icon.run()
