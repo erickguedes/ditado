@@ -1,3 +1,4 @@
+import logging
 import os
 import queue
 import threading
@@ -201,6 +202,7 @@ class AudioRecorder:
         from encoder import mix_to_stereo
 
         LOOP_FRAME_BYTES = 1024 * 2 * 2  # 1024 stereo frames × int16 × 2ch
+        MAX_LOOP_BUF = LOOP_FRAME_BYTES * 64  # ~8s safety cap
         loop_buf = b""
 
         while not self._stop_event.is_set() or not (
@@ -215,9 +217,14 @@ class AudioRecorder:
             while True:
                 try:
                     raw = self._loopback_queue.get_nowait()
-                    loop_buf += self._resample_pcm(
+                    chunk = self._resample_pcm(
                         raw, self._loopback_rate, SAMPLE_RATE, self._loopback_channels
                     )
+                    # Cap buffer to avoid OOM if mic stalls
+                    if len(loop_buf) + len(chunk) <= MAX_LOOP_BUF:
+                        loop_buf += chunk
+                    else:
+                        logging.warning("Loopback buffer capped (%d bytes)", len(loop_buf))
                 except queue.Empty:
                     break
 

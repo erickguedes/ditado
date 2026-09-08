@@ -45,3 +45,6 @@ Thumbs.db
 
 # Internal project files
 project-template.md
+
+# Session logs
+session-*.md
